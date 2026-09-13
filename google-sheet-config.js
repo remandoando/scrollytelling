@@ -11,7 +11,7 @@
 // Also, you must Share the sheet so that anyone with a link can access it
 //     Share button at top right of sheet -> General Access -> Anyone with the link -> Viewer
 // prettier-ignore
-export const googleSheetURL = "https://docs.google.com/spreadsheets/d/1JXcc2w53bpef97eAIoDUtfqzkg98ES6tz-oGAWioCZc/edit?usp=sharing";
+export const googleSheetURL = "https://docs.google.com/spreadsheets/d/1JXcc2w53bpef97eAIoDUtfqzkg98ES6tz-oGAWioCZc/edit?gid=691699971#gid=691699971
 
 // An API Key is required to read a google sheet from an application. The one below is for this version
 // of the application, you will need to generate your own key if you plan to publish this scrolly story on
