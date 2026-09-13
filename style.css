@@ -1,0 +1,128 @@
+l/* style.css contains the CSS of the page elements not related to scrollytelling */
+
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Forum", serif;
+  font-weight: 400;
+  font-style: normal;
+  min-height: 1280px;
+  color: #3b3b3b;
+}
+
+p,
+h1,
+h2,
+h3,
+h4,
+a {
+  margin: 0;
+  font-weight: 400;
+}
+
+.intro-header {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 0 0.75rem;
+  flex-wrap: nowrap;
+}
+
+#intro {
+  flex: 0 1 auto;
+  max-width: 40rem;
+  margin: 1rem 0 50px 0;
+  padding: 0 3rem;
+  text-align: center;
+}
+
+#story-title {
+  font-family: "Josefin Sans", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 700;
+  font-style: normal;
+  font-size: 3rem;
+  margin: 1rem 1rem 0.5rem 1rem;
+}
+
+#subtitle {
+  font-size: 2rem;
+}
+
+#byline {
+  font-size: 1.5rem;
+}
+
+#mobile-warning {
+  display: none;
+}
+
+@media only screen and (max-width: 768px) {
+  #mobile-warning {
+    display: block;
+    border-style: solid;
+    border-color: orange;
+    border-radius: 8px;
+    padding: 5px;
+  }
+}
+
+#outro {
+  margin: 3rem;
+  min-height: 640px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (min-width: 840px) {
+  .nav__examples {
+    margin-top: 0;
+    margin-left: 2rem;
+  }
+}
+
+#error-container {
+  display: none; /* hide by default, set to 'flex' when displayed */
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+#error-dialog {
+  background-color: #f77373;
+  color: D8000C;
+  border: 3px solid #f77379;
+  max-width: 600px;
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 1.25rem;
+}
+
+#error-header {
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 2rem;
+}
+
+#error-message {
+  font-weight: bold;
+  margin-bottom: 2rem;
+  font-size: 2rem;
+  text-align: center;
+}
+
+#error-action-container {
+  text-align: left;
+  margin-bottom: 0.5rem;
+}
+
+#error-hint {
+  display: none; /* only display if it exists */
+}

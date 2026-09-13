@@ -1,0 +1,348 @@
+/*
+  Scrolly.js handles all the scrolling. It uses the Scrollama library to detect when a step
+  is entered, and then replaces the content in the sticky container with the content associated with
+  that step. It also handles transitions between different types of content (images, maps, videos). 
+*/
+
+import { StepData, isPrintView } from "./common.js";
+import { displayStickyMap, invalidateLeafletMapSize } from "./leaflet-maps.js";
+import { convertPageToPrintView } from "./print-view.js";
+import { hideTimelineStepMarker, setActiveTimelineStep } from "./timeline.js";
+
+let _stickyImageContainer = null;
+let _stickyMapContainer = null;
+let _stickyVideoContainer = null;
+let _prevStepData = null;
+let _currentStep = -1;
+let _isTransitioning = false;
+
+const transitionInMilliseconds = 500;
+
+// scrollama notifies us when a step is entered/scrolled to
+let scroller = scrollama();
+
+document.addEventListener("DOMContentLoaded", async function () {
+  const isRenderedExport = window.__SCROLLY_EXPORTED_RENDERED__ === true;
+  if (!isRenderedExport) {
+    const { createAllStoryScrollyContentInHTML } =
+      await import("./create-content.js");
+    await createAllStoryScrollyContentInHTML();
+  }
+
+  const printView = isPrintView();
+  if (printView) {
+    await convertPageToPrintView();
+    return;
+  }
+
+  // initialize scrollama after the scrolly content has been created
+  if (!printView) {
+    initScrollama();
+  }
+});
+
+// scrollama event handlers
+function handleStepEnter(response) {
+  if (_isTransitioning) {
+    console.log("Currently transitioning, ignoring step enter");
+    return; // ignore if currently transitioning
+  }
+  _isTransitioning = true;
+  var stepElement = response.element;
+
+  if (stepElement.dataset.step == _currentStep) {
+    console.log("Already at this step, doing nothing");
+    _isTransitioning = false;
+    return;
+  }
+  _currentStep = stepElement.dataset.step;
+
+  // Set active step state to is-active and all othe steps not active
+  const steps = document.querySelectorAll(".step");
+  steps.forEach((step) => step.classList.remove("is-active"));
+  stepElement.classList.add("is-active");
+  console.log("Step " + stepElement.dataset.step + " entered");
+  setActiveTimelineStep(stepElement.dataset.step);
+
+  setStepHorizontalWidths(stepElement);
+  replaceStepStickyContent(stepElement);
+
+  _isTransitioning = false;
+}
+
+function handleStepExit(response) {
+  const stepElement = response.element;
+  if (!stepElement || !stepElement.dataset || !stepElement.dataset.step) {
+    return;
+  }
+  hideTimelineStepMarker(stepElement.dataset.step);
+}
+
+function setStepHorizontalWidths(stepElement) {
+  const scrollyContainer = stepElement.closest(".scrolly-container");
+  if (!scrollyContainer) return;
+
+  const stepsContainer = scrollyContainer.querySelector(".steps-container");
+  const stickyContainer = scrollyContainer.querySelector(".sticky-container");
+  const horizontalPercentage = parseFloat(
+    stepElement.dataset.textHorizontalPercentage,
+  );
+
+  // When the text horizontal percentage is very small or 0, the trigger for
+  // which step we are one gets confused. The user scrolls to a new step,
+  // the layout changes so there is no hoirizonatl space for the text, and then
+  // the step reverts back to the previous step because the text area is no longer
+  // visible. To avoid this, we set a minimum of 5% horizontal space for the text,
+  // but then hide the text box entirely so it appears as if there is 0% text.
+  // Note that the sticky container is set to 90% width in this mode to ensure
+  // there is enough right margin for the sticky content to display properly.
+  // This is a bit of a hack, but it works around the limitations of scrollama.
+  // Also note that we don't need to do this when the text percentage is 100%,
+  // because the sticky container is fully hidden in that case and the sticky
+  // content location doesn't affect which step is active.
+
+  if (horizontalPercentage <= 5) {
+    stepsContainer.classList.add("step-content-hidden");
+    stickyContainer.classList.add("no-left-margin");
+
+    stepsContainer.style.width = `5%`;
+    stickyContainer.style.width = `90%`;
+  } else {
+    // Revert to normal side-by-side mode
+    stepsContainer.classList.remove("step-content-hidden");
+    stickyContainer.classList.remove("no-left-margin");
+
+    // Set the widths for the normal layout
+    stepsContainer.style.width = `${horizontalPercentage}%`;
+    stickyContainer.style.width = `${100 - horizontalPercentage}%`;
+  }
+  // Leaflet maps were sometimes not displaying the whole map after a
+  // horizontal width change, so we invalidated the map size to force a redraw.
+  // However, this seems to have messed up back scrolling somehow. Needs more
+  // investigation.
+  //invalidateLeafletMapSize();
+}
+
+/* As we enter a step in the story, replace or modify the sticky content
+   in HTML based on the step data
+*/
+function replaceStepStickyContent(stepElement) {
+  let stepData = stepElement.dataset;
+
+  // ensure we have the sticky containers associated with the current step
+  setCurrentStickyContainers(stepElement);
+
+  const needsTransition = doesRequireStickyTransition(stepData);
+
+  // display different sticky container if needed
+  if (needsTransition) {
+    transitionToNewStickyContentContainer(stepData.contentType);
+  }
+
+  // Replace the content in the sticky container
+  if (stepData.contentType === "image") {
+    displayStickyImage(stepData);
+  } else if (stepData.contentType === "video") {
+    displayStickyVideo(stepData);
+  } else if (stepData.contentType === "map") {
+    if (needsTransition) {
+      // for maps, need to wait until after the transition to display,
+      // otherwise the parent container may still be display:none
+      // and leaflet won't know its parent size to display properly
+      setTimeout(() => {
+        displayStickyMap(
+          _stickyMapContainer.id,
+          stepData.latitude,
+          stepData.longitude,
+          stepData.zoomLevel,
+        );
+      }, transitionInMilliseconds + 100);
+    } else {
+      displayStickyMap(
+        _stickyMapContainer.id,
+        stepData.latitude,
+        stepData.longitude,
+        stepData.zoomLevel,
+      );
+    }
+    addAltTextToMap(_stickyMapContainer, stepData.altText);
+  }
+  _prevStepData = stepData;
+}
+
+function doesRequireStickyTransition(stepData) {
+  // Transition to a new sticky container if the content type is different
+  // or if the step number is not sequential
+  return (
+    _prevStepData == null ||
+    _prevStepData.contentType != stepData.contentType ||
+    Math.abs(parseInt(_prevStepData.step) - parseInt(stepData.step)) > 1
+  );
+}
+
+function setCurrentStickyContainers(stepElement) {
+  // Since there are multiple scrolly containers, find the sticky container
+  // that is associated with the current scrolly container
+
+  // Find the scrolly container of the currrent step
+  const scrollyContainer = stepElement.closest(".scrolly-container");
+  const stickyContainer = scrollyContainer.querySelector(".sticky-container");
+
+  // search for each of the corrsponding sticky containers within this scrolly container
+  _stickyImageContainer = stickyContainer.querySelector(
+    ".sticky-image-container",
+  );
+  _stickyMapContainer = stickyContainer.querySelector(".sticky-map-container");
+  _stickyVideoContainer = stickyContainer.querySelector(
+    ".sticky-video-container",
+  );
+}
+
+function transitionToNewStickyContentContainer(activateContentType) {
+  // Start fading out the old container (just do all of them).
+  // We've set up a transition on opacity, so setting it to 0 or 1 will take
+  // as long as specified in CSS. We can fade in the new content after that
+  _stickyMapContainer.style.opacity = 0;
+  _stickyImageContainer.style.opacity = 0;
+  _stickyVideoContainer.style.opacity = 0;
+
+  stopPlayingVideo(); // in case video is playing, don't want to hear it after it scrolls off page
+
+  // Fade in the new container after the opacity transition
+  setTimeout(() => {
+    switch (activateContentType) {
+      case "image":
+        _stickyImageContainer.style.opacity = 1;
+        _stickyImageContainer.style.display = "flex";
+        _stickyVideoContainer.style.display = "none";
+        _stickyMapContainer.style.display = "none";
+        break;
+      case "map":
+        _stickyMapContainer.style.opacity = 1;
+        _stickyMapContainer.style.display = "block";
+        _stickyImageContainer.style.display = "none";
+        _stickyVideoContainer.style.display = "none";
+        break;
+      case "video":
+        _stickyVideoContainer.style.opacity = 1;
+        _stickyVideoContainer.style.display = "block";
+        _stickyImageContainer.style.display = "none";
+        _stickyMapContainer.style.display = "none";
+        break;
+    }
+  }, transitionInMilliseconds + 100);
+}
+
+function displayStickyImage(stepData) {
+  let img = _stickyImageContainer.querySelector("img");
+
+  // only replace sticky image if it has changed, to avoid flickering
+  if (
+    !_prevStepData ||
+    (stepData.filePath && _prevStepData.filePath != stepData.filePath)
+  ) {
+    // Fade out the current image before changing the source
+    // Note that this will double the transition when we are switching from
+    // an image to a different content type because the containers also fade in/out
+    // in that case, but that's ok, a longer transition is appropriate in that case
+    img.style.opacity = 0;
+
+    // fade in the image after the opacity transition
+    setTimeout(() => {
+      // Change the image source
+      img.src = stepData.filePath;
+      img.alt = stepData.altText;
+      img.style.opacity = 1;
+
+      setImageOrientation(img, stepData.imageOrientation);
+    }, transitionInMilliseconds);
+  }
+  if (stepData.zoomLevel) {
+    img.style.transform = `scale(${stepData.zoomLevel})`;
+  }
+}
+
+function setImageOrientation(img, imageOrientation) {
+  if (imageOrientation && imageOrientation.toLowerCase() === "vertical") {
+    img.style.objectFit = "contain"; // display more of the vertical space of the image
+  } else {
+    img.style.objectFit = "cover"; // display more of the horizontal space of the image
+  }
+}
+
+function displayStickyVideo(stepData) {
+  _stickyVideoContainer.innerHTML = "";
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "the-iframe-video";
+  iframe.src = stepData.filePath;
+  iframe.setAttribute("frameborder", "0");
+  iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+  iframe.setAttribute("allowfullscreen", "");
+  iframe.title = stepData.altText || "Embedded video";
+
+  _stickyVideoContainer.appendChild(iframe);
+  _stickyVideoContainer.setAttribute("aria-label", stepData.altText || "Video");
+  _stickyVideoContainer.setAttribute("role", "region");
+
+  _prevStepData = stepData.filePath;
+}
+
+function stopPlayingVideo() {
+  // To properly do this, we'd have to know which streaming service, if any, is currently
+  // playing and call a different API for each service to stop their player.
+  // Instead, we'll just blank out the source of the video -- it will get loaded again the
+  // next time a step is invoked.
+  const iframe = document.getElementById("the-iframe-video");
+  if (iframe != null) {
+    iframe.src = "";
+  }
+}
+
+function addAltTextToMap(mapElement, altText) {
+  mapElement.setAttribute("aria-label", altText);
+}
+
+function initScrollama() {
+  scroller
+    .setup({
+      step: ".scrolly-container .step",
+      offset: 0.65, // what % from the top of the viewport the step should be considered "entered"
+      debug: false,
+    })
+    .onStepEnter(handleStepEnter)
+    .onStepExit(handleStepExit);
+
+  // setup resize event
+  window.addEventListener("resize", () => {
+    scroller.resize();
+    invalidateLeafletMapSize();
+  });
+}
+
+/**
+ * Watch for the Soundcite libraryadding its audio player div to the DOM.
+ * When it detects the div, it trims the leading space from the class name
+ * to prevent rendering issues in Safari.
+ */
+const observer = new MutationObserver((mutationsList) => {
+  for (const mutation of mutationsList) {
+    if (mutation.type === "childList") {
+      mutation.addedNodes.forEach((node) => {
+        // Check if the added node is an element and has the problematic class
+        if (
+          node.nodeType === Node.ELEMENT_NODE &&
+          node.classList.contains("soundcite-audio")
+        ) {
+          // Trim the className to remove leading/trailing spaces
+          node.className = node.className.trim();
+          // We found and fixed the node, so we can stop observing
+          observer.disconnect();
+        }
+      });
+    }
+  }
+});
+
+// Start observing the body for added child elements
+observer.observe(document.body, { childList: true, subtree: true });
